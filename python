@@ -1,0 +1,73 @@
+import streamlit as st
+import docx
+import pandas as pd
+import io
+
+# --- EXTRACTION LOGIC ---
+def get_field_value(tables, label_name):
+    for df in tables:
+        rows, cols = df.shape
+        for r in range(rows):
+            for c in range(cols):
+                cell_text = str(df.iloc[r, c]).strip()
+                if label_name.upper() in cell_text.upper():
+                    if ":" in cell_text and len(cell_text.split(":", 1)[1].strip()) > 1:
+                        return cell_text.split(":", 1)[1].strip()
+                    for offset in range(1, 3):
+                        if c + offset < cols:
+                            val = str(df.iloc[r, c + offset]).strip()
+                            if val and val != ":":
+                                return val
+    return "N/A"
+
+# --- WEB INTERFACE ---
+st.set_page_config(page_title="NGO Memo Extractor", layout="wide")
+st.title("📄 NGO Credit Memo Data Extractor")
+st.write("Upload your Word (.docx) files to automatically generate a structured Excel database.")
+
+# 1. File Uploader (Accepts multiple files)
+uploaded_files = st.file_uploader("Choose Word Files", type="docx", accept_multiple_files=True)
+
+if uploaded_files:
+    all_data = []
+    
+    # List of your 21 specific fields
+    fields = [
+        "Memo date", "Relationship", "Group", "Main Borrower", "Co-Utilizer",
+        "CRG", "E&S Risk", "CIB Status", "External Rating", "Strategy",
+        "Segment", "Lending Rate", "Exposure Type", "Branch", "Key Person",
+        "Enhancement History", "RM", "UH", "Risk Manager", "AH", "Risk UH"
+    ]
+
+    for uploaded_file in uploaded_files:
+        doc = docx.Document(uploaded_file)
+        tables = [pd.DataFrame([[c.text.strip() for c in r.cells] for r in t.rows]) for t in doc.tables]
+
+        record = {"Source File": uploaded_file.name}
+        for field in fields:
+            record[field] = get_field_value(tables, field)
+        
+        all_data.append(record)
+
+    # Create DataFrame
+    df_final = pd.DataFrame(all_data)
+
+    # 2. Show Preview in the Browser
+    st.subheader("Data Preview")
+    st.dataframe(df_final)
+
+    # 3. Create Excel Download Link
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_final.to_excel(writer, index=False, sheet_name='Extracted Data')
+    
+    processed_data = output.getvalue()
+
+    st.download_button(
+        label="📥 Download Consolidated Excel File",
+        data=processed_data,
+        file_name="NGO_Master_Database.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    st.success(f"Successfully processed {len(uploaded_files)} files!")
